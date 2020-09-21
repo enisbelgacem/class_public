@@ -24,13 +24,8 @@ CC       = gcc
 # your tool for creating static libraries:
 AR        = ar rv
 
-# Your python interpreter.
-# In order to use Python 3, you can manually
-# substitute python3 to python in the line below, or you can simply
-# add a compilation option on the terminal command line:
-# "PYTHON=python3 make all" (THanks to Marius Millea for pyhton3
-# compatibility)
-PYTHON ?= python
+# (OPT) your python interpreter
+PYTHON = ~/mypython/bin/python
 
 # your optimization flag
 OPTFLAG = -O4 -ffast-math #-march=native
@@ -63,6 +58,16 @@ INCLUDES = -I../include
 # automatically add external programs if needed. First, initialize to blank.
 EXTERNAL =
 
+# Try to automatically avoid an error 'error: can't combine user with ...'
+# which sometimes happens with brewed Python on OSX:
+CFGFILE=$(shell $(PYTHON) -c "import sys; print sys.prefix+'/lib/'+'python'+'.'.join(['%i' % e for e in sys.version_info[0:2]])+'/distutils/distutils.cfg'")
+PYTHONPREFIX=$(shell grep -s "prefix" $(CFGFILE))
+ifeq ($(PYTHONPREFIX),)
+PYTHONFLAGS=--user
+else
+PYTHONFLAGS=
+endif
+
 # eventually update flags for including HyRec
 ifneq ($(HYREC),)
 vpath %.c $(HYREC)
@@ -75,7 +80,7 @@ endif
 %.o:  %.c .base
 	cd $(WRKDIR);$(CC) $(OPTFLAG) $(OMPFLAG) $(CCFLAG) $(INCLUDES) -c ../$< -o $*.o
 
-TOOLS = growTable.o dei_rkck.o sparse.o evolver_rkck.o  evolver_ndf15.o arrays.o parser.o quadrature.o hyperspherical.o common.o trigonometric_integrals.o
+TOOLS = growTable.o dei_rkck.o sparse.o evolver_rkck.o  evolver_ndf15.o arrays.o parser.o quadrature.o hyperspherical.o common.o
 
 SOURCE = input.o background.o thermodynamics.o perturbations.o primordial.o nonlinear.o transfer.o spectra.o lensing.o
 
@@ -105,9 +110,7 @@ CLASS = class.o
 
 TEST_LOOPS = test_loops.o
 
-TEST_LOOPS_OMP = test_loops_omp.o
-
-TEST_SPECTRA = test_spectra.o
+TEST_DEGENERACY = test_degeneracy.o
 
 TEST_TRANSFER = test_transfer.o
 
@@ -119,7 +122,11 @@ TEST_THERMODYNAMICS = test_thermodynamics.o
 
 TEST_BACKGROUND = test_background.o
 
+TEST_SIGMA = test_sigma.o
+
 TEST_HYPERSPHERICAL = test_hyperspherical.o
+
+TEST_STEPHANE = test_stephane.o
 
 C_TOOLS =  $(addprefix tools/, $(addsuffix .c,$(basename $(TOOLS))))
 C_SOURCE = $(addprefix source/, $(addsuffix .c,$(basename $(SOURCE) $(OUTPUT))))
@@ -132,6 +139,9 @@ INI_ALL = explanatory.ini lcdm.ini
 MISC_FILES = Makefile CPU psd_FD_single.dat myselection.dat myevolution.dat README bbn/sBBN.dat external_Pk/* cpp
 PYTHON_FILES = python/classy.pyx python/setup.py python/cclassy.pxd python/test_class.py
 
+
+
+
 all: class libclass.a classy
 
 libclass.a: $(TOOLS) $(SOURCE) $(EXTERNAL)
@@ -140,14 +150,17 @@ libclass.a: $(TOOLS) $(SOURCE) $(EXTERNAL)
 class: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(CLASS)
 	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o class $(addprefix build/,$(notdir $^)) -lm
 
+test_sigma: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(TEST_SIGMA)
+	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o test_sigma $(addprefix build/,$(notdir $^)) -lm
+
 test_loops: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(TEST_LOOPS)
 	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o $@ $(addprefix build/,$(notdir $^)) -lm
 
-test_loops_omp: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(TEST_LOOPS_OMP)
+test_stephane: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(TEST_STEPHANE)
 	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o $@ $(addprefix build/,$(notdir $^)) -lm
 
-test_spectra: $(TOOLS) $(SOURCE) $(EXTERNAL) $(TEST_SPECTRA)
-	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o  $@ $(addprefix build/,$(notdir $^)) -lm
+test_degeneracy: $(TOOLS) $(SOURCE) $(EXTERNAL) $(OUTPUT) $(TEST_DEGENERACY)
+	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o $@ $(addprefix build/,$(notdir $^)) -lm
 
 test_transfer: $(TOOLS) $(SOURCE) $(EXTERNAL) $(TEST_TRANSFER)
 	$(CC) $(OPTFLAG) $(OMPFLAG) $(LDFLAG) -o  $@ $(addprefix build/,$(notdir $^)) -lm
@@ -172,13 +185,7 @@ tar: $(C_ALL) $(C_TEST) $(H_ALL) $(PRE_ALL) $(INI_ALL) $(MISC_FILES) $(HYREC) $(
 	tar czvf class.tar.gz $(C_ALL) $(H_ALL) $(PRE_ALL) $(INI_ALL) $(MISC_FILES) $(HYREC) $(PYTHON_FILES)
 
 classy: libclass.a python/classy.pyx python/cclassy.pxd
-ifdef OMPFLAG
-	cp python/setup.py python/autosetup.py
-else
-	grep -v "lgomp" python/setup.py > python/autosetup.py
-endif
-	cd python; export CC=$(CC); $(PYTHON) autosetup.py install || $(PYTHON) autosetup.py install --user
-	rm python/autosetup.py
+	cd python; export CC=$(CC); $(PYTHON) setup.py install $(PYTHONFLAGS)
 
 clean: .base
 	rm -rf $(WRKDIR);
